@@ -29,11 +29,11 @@ Sample code:
 
     let machine = StateMachine<LoadState, LoadAction>(initialState: .Start)
 
-    machine.registerAction(.Load, fromStates: [.Start, .Failed], toStates: [.Loading) { (machine) -> StateMachineTests.LoadState in
+    machine.registerAction(.Load, fromStates: [.Start, .Failed], toStates: [.Loading]) { (machine) -> StateMachineTests.LoadState in
         return .Loading
     }
 
-    machine.registerAction(.FinishLoading, fromStates: [.Loading], toStates: [.Complete, .Failed) { (machine) -> StateMachineTests.LoadState in
+    machine.registerAction(.FinishLoading, fromStates: [.Loading], toStates: [.Complete, .Failed]) { (machine) -> StateMachineTests.LoadState in
         return .Complete // (or return .Failed if that's the case)
     }
 
@@ -55,7 +55,7 @@ Sample code:
     machine.performAction(.Load) // returns nil
 
 */
-public class StateMachine<S, A where S: Hashable, A: Hashable, S: CustomStringConvertible, A: CustomStringConvertible> {
+public class StateMachine<S, A where S: Hashable, A: Hashable, S: Printable, A: Printable> {
 
     /** An action handler
 
@@ -120,11 +120,11 @@ public class StateMachine<S, A where S: Hashable, A: Hashable, S: CustomStringCo
     Registers a handler to run when performAction() is called. The action is only to be run if the state matches any of
     the states in the fromStates set. The handler must return a new state which will be set on the state machine after
     the handler has run.
-    
+
     - Note: Only one handler can be registered for an action.
-    
+
     - Warning: Make sure to avoid retain loops in your code. For example, if you setup the machine in a variable of your
-    view controller and you then try to access that view controller from the actionHandler, you should use `[weak self]` 
+    view controller and you then try to access that view controller from the actionHandler, you should use `[weak self]`
     or `[unowned self]` for the handler.
 
     - parameter action: The action name
@@ -138,15 +138,34 @@ public class StateMachine<S, A where S: Hashable, A: Hashable, S: CustomStringCo
 
     /** Performs a registered action
 
-    The action will only be performed if the machine is in one of the states for which the action was registered.
+    The action will only be performed if the machine is in one of the states for which the action was registered. The you specify a delay the action will be performed on the main queue.
+    
+    - Note: If you don't specify a delay, you must be guarantee that the method is not called from within an action handler registered with the machine.
 
     - parameter action: The action to perform
-    - returns: Returns the new state if the action was run, or nil if the action not run
+    - parameter delay: The delay in seconds after which the action should be performed
+    - returns: Returns the new state if the action was run, or nil if the action is not (yet) run
     */
-    public func performAction(action: A) -> S? {
+    public func performAction(action: A, afterDelay delay: NSTimeInterval? = nil) -> S? {
+        if let delay = delay {
+            dispatch_after(
+                dispatch_time(DISPATCH_TIME_NOW, Int64(delay * Double(NSEC_PER_SEC))),
+                dispatch_get_main_queue(), { [weak self] in
+                    self?.performAction(action)
+            })
+            return nil
+        }
+
+        if actionHandlerRunning {
+            print("WARNING: The action \"\(action)\" is ignored because there is still another unfinished action. If you called performAction (indirectly) from within an action handler, consider setting a delay.")
+            return nil
+        }
+
         if let (fromStates, toStates, actionHandler) = actions[action] {
             if fromStates.contains(state) {
+                actionHandlerRunning = true
                 let newState = actionHandler(machine: self)
+                actionHandlerRunning = false
                 if toStates.contains(newState) {
                     state = newState
                     return state
@@ -158,14 +177,16 @@ public class StateMachine<S, A where S: Hashable, A: Hashable, S: CustomStringCo
         return nil
     }
 
+    private var actionHandlerRunning: Bool = false
+
     private var changes: [(Set<S>?, Set<S>?, ChangeHandler)] = []
 
     /** Registers a handler to run on state change
 
     Registers a handler to run when the state of the machine changes. A change handler only gets run if the old state
-    occurs in the fromStates set and the new state occurs in the toStates set. A nil set for either means any state 
+    occurs in the fromStates set and the new state occurs in the toStates set. A nil set for either means any state
     is acceptable.
-    
+
     - Note: If an action set the same state as was already set, these handlers get run too.
     - Note: The change handlers will be run in the order they were registered.
 
@@ -173,13 +194,13 @@ public class StateMachine<S, A where S: Hashable, A: Hashable, S: CustomStringCo
     - parameter toStates: The handler is only run if the new state is in this set. If nil, any state is acceptable.
     - parameter changeHandler: The handler to run
     */
-    public func onChange(fromStates fromStates: Set<S>? = nil, toStates: Set<S>? = nil, changeHandler: ChangeHandler) {
+    public func onChange(fromStates: Set<S>? = nil, toStates: Set<S>? = nil, changeHandler: ChangeHandler) {
         changes.append((fromStates, toStates, changeHandler))
     }
-    
+
 }
 
-extension StateMachine {
+public extension StateMachine {
 
     var flowdiagramRepresentation: String {
         let representation = Flowdiagram(machine: self)
@@ -188,7 +209,7 @@ extension StateMachine {
 
 }
 
-class Flowdiagram<S, A where S: Hashable, A: Hashable, S: CustomStringConvertible, A: CustomStringConvertible>: CustomStringConvertible {
+class Flowdiagram<S, A where S: Hashable, A: Hashable, S: Printable, A: Printable>: Printable {
 
     let machine:  StateMachine<S, A>
 
@@ -204,9 +225,9 @@ class Flowdiagram<S, A where S: Hashable, A: Hashable, S: CustomStringConvertibl
         addState(a)
 
         for (action, (fromStates, toStates, _)) in machine.actions {
-            fromStates.forEach() { fromState in
+            for fromState in fromStates {
                 let fromStateIndex = addState(fromState)
-                toStates.forEach() { toState in
+                for toState in toStates {
                     let toStateIndex = addState(toState)
                     addAction(action, fromIndex: fromStateIndex, toIndex: toStateIndex)
                 }
@@ -220,7 +241,7 @@ class Flowdiagram<S, A where S: Hashable, A: Hashable, S: CustomStringConvertibl
                 return "    \(index) [label=\"\(action)\", shape=oval]\n"
             }
             return "    \n"
-        })
+            })
 
         let linksStr = "".join(links.map() { (from: Int, to: Int, hasArrow: Bool) in
             if hasArrow {
@@ -228,7 +249,7 @@ class Flowdiagram<S, A where S: Hashable, A: Hashable, S: CustomStringConvertibl
             } else {
                 return "    \(from) -> \(to) [arrowhead=none]\n"
             }
-        })
+            })
 
         return "digraph {\n    graph [rankdir=TB]\n    \n    0 [label=\"\", shape=plaintext]\n    0 -> 1\n    \n    # node\n\(nodesStr)\n    \n    # links\n\(linksStr)\n}"
     }
@@ -239,12 +260,13 @@ class Flowdiagram<S, A where S: Hashable, A: Hashable, S: CustomStringConvertibl
     private func addState(state: S) -> Int {
         let filtered = nodes.filter() { (index: Int, aState: S?, action: A?) in
             return aState == nil ? false : state == aState!
-            }
+        }
         if let (index, _, _) = filtered.first {
             return index
         } else {
             let index = nodes.count + 1
-            nodes.append((index, state, nil))
+            let node: (Int, S?, A?) = (index, state, nil)
+            nodes.append(node)
             return index
         }
     }
@@ -257,7 +279,8 @@ class Flowdiagram<S, A where S: Hashable, A: Hashable, S: CustomStringConvertibl
             return index
         } else {
             let index = nodes.count + 1
-            nodes.append((index, nil, action))
+            let node: (Int, S?, A?) = (index, nil, action)
+            nodes.append(node)
             return index
         }
     }
@@ -268,13 +291,13 @@ class Flowdiagram<S, A where S: Hashable, A: Hashable, S: CustomStringConvertibl
         addLink(fromIndex: actionIndex, toIndex: toIndex, hasArrow: true)
     }
 
-    private func addLink(fromIndex fromIndex: Int, toIndex: Int, hasArrow: Bool) {
-        if !links.contains({ (from: Int, to: Int, arrow: Bool) in
+    private func addLink(#fromIndex: Int, toIndex: Int, hasArrow: Bool) {
+        if !contains(links, { (from: Int, to: Int, arrow: Bool) in
             return from == fromIndex && to == toIndex && arrow == hasArrow
         }) {
             links.append((fromIndex, toIndex, hasArrow))
         }
     }
-
+    
 }
 
