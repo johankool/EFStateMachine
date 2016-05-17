@@ -8,19 +8,18 @@ EFStateMachine.swift
 
 __A Simple State Machine in Swift__
 
+FIXME: OUTDATED
+
 Highlights of this state machine:
 
-* uses enums for states and actions
-* uses blocks to run actions and change state
-* runs callback handles on state changes
-* tracks state history
-* creates flow diagram for visual inspection
+* uses enums for states
+* support for associate types in state enums
+* runs callback handler on state changes
 
 This state machine is typically setup with an enum for its possible states, and an enum for its actions. The state
-of the machine determines wether an action is allowed to run. The state of a machine can only be changed via an
-action. The action handler returns the new state of the machine.
+of the machine determines wether an action is allowed to run.
 
-It is also possible to register multiple handlers that get run when certain state changes occur.
+It is also possible to register a handler that get run when a state changes occur.
 
 ## Requirements
 
@@ -36,11 +35,11 @@ The API is fully documented in the source. See also the [example](#example) belo
 
 To install using CocoaPods, add to your Podfile:
 
-    pod 'EFStateMachine', '~> 0.2'
+    pod 'EFStateMachine', '~> 0.3'
 
 To install using Carthage, add to your Cartfile:
 
-    github "Egeniq/EFStateMachine" ~> 0.2
+    github "Egeniq/EFStateMachine" ~> 0.3
 
 Or you just compile the source and add the `StateMachine.framework` to your own project.
 
@@ -50,122 +49,96 @@ Say you want to create the state machine to capture the flow in this diagram:
 
 ![flow diagram](example-flow-diagram.png)
 
-First, create an `enum` to hold the states. It should conform to the `Hashable` protocol. Using a `String` typed `enum` is recommended.
+First, create an `enum` to hold the states.
 
 ```swift
-enum LoadState: String {
+enum State {
     case Empty
-    case Loading
-    case Complete
-    case Failed
-}
-```
-
-The `enum` for the actions is declared the same way.
-
-```swift
-enum LoadAction: String {
-    case Load
-    case FinishLoading
-    case Cancel
-    case Reset
+    case Loading(loadingMore: Bool)
+    case Loaded(hasMore: Bool, offset: Int, updated: NSDate)
 }
 ```
 
 Now that we have both the states and actions declared, we can create the machine and give it its initial state.
 
 ```swift
-let machine = StateMachine<LoadState, LoadAction>(initialState: .Empty)
+let machine = StateMachine(initialState: State.Empty) { old, new in
+    switch (old, new) {
+    // Load
+    case (.Empty, .Loading(let loadingMore)):
+        return !loadingMore
+    // Finish loading
+    case (.Loading, .Loaded):
+        return true
+    // Refresh/Load More
+    case (.Loaded(let hasMore, _, _), .Loading(let loadingMore)):
+        return !loadingMore || (hasMore && loadingMore)
+    default:
+        return false
+    }
+}
 ```
 
 For each action, register a handler to run. The handler will only be run if the current state of the state machine is one of those listed in `fromStates`. The handler must return a state, which will become the new state of the state machine.
 
 ```swift
-machine.registerAction(.Load, fromStates: [.Empty, .Failed], toStates: [.Loading]) { (machine) -> LoadState in
-    return .Loading
+
+
+func load() {
+    if machine.changeToState(.Loading(loadingMore: false)) {
+        // Load items
+        itemService.loadItems(offset: 0) { result, hasMore, offset in
+            items = result
+            machine.changeToState(.Loaded(hasMore: hasMore, offset: offset, updated: NSDate()))
+        }
+    }
 }
 
-machine.registerAction(.FinishLoading, fromStates: [.Loading], toStates: [.Complete, .Failed]) { (machine) -> LoadState in
-    return .Complete // (or return .Failed if that's the case)
+func refresh() {
+    if machine.changeToState(.Loading(loadingMore: false)) {
+        // Reset
+        items.removeAll()
+
+        // Load items
+        itemService.loadItems(offset: 0) { result, hasMore, offset in
+            items = result
+            machine.changeToState(.Loaded(hasMore: hasMore, offset: offset, updated: NSDate()))
+        }
+    }
 }
 
-machine.registerAction(.Reset, fromStates: [.Complete, .Failed], toStates: [.Empty]) { (machine) -> LoadState in
-    return .Empty
-}
-```
+func loadMore() {
+    guard case let State.Loaded(_, offset, _) = machine.state else { return }
 
-Because the state machine keeps track of its state history, you can implement methods to handle cancelling an asynchronous task.
-
-```swift
-machine.registerAction(.Cancel, fromStates: [.Loading], toStates: [.Empty, .Failed]) { (machine) -> LoadState in
-    return machine.history[machine.history.count - 2]
+    if machine.changeToState(.Loading(loadingMore: true)) {
+        // Load more items
+        itemService.loadItems(offset: offset) { result, hasMore, offset in
+            items.appendContentsOf(result)
+            machine.changeToState(.Loaded(hasMore: hasMore, offset: offset, updated: NSDate()))
+        }
+    }
 }
 ```
 
 You can also observe state changes and act upon such events. This is also a good moment to point out that you should be careful not to introduce retain loops. If `self` holds the state machine, you should use `[unowned self` or `[weak self]` with your handler.
 
 ```swift
-machine.onChange(toStates: [.Complete]) { [unowned self] (machine, oldState, newState) -> Void in
-    self.infoLabel.text = "Complete!"
+machine.onChange = { [unowned self] old, new in
+    switch new {
+    case .Empty:
+        self.statusLabel.text = "Hello!"
+    case .Loading:
+        self.statusLabel.text = "Loading"
+    case .Loaded(_, _, let updated):
+        self.statusLabel.text = "Last updated \(updated)"
+    }
 }
 ```
 
-Now your state machine is ready to be used. Performing an action is straightforward. If you get back a state, you know the action was run, if `nil` is returned the action was ignored.
+Now your state machine is ready to be used.
 
 ```swift
-// Start loading
-machine.performAction(.Load) // returns .Loading
-
-// Loading finished
-machine.performAction(.FinishLoading) // returns .Complete and updates infoLabel to "Complete!"
-
-// Try loading again (an invalid action)
-machine.performAction(.Load) // returns nil
+load()
+refresh()
+loadMore()
 ```	
-
-## Flow diagram
-
-To get a flow diagram like shown above, you save the string returned by the `flowdiagramRepresentation` property to a dot file. You can render the diagram with the free app [GraphViz](http://graphviz.org).
-
-```swift
-do {
-    try machine.saveFlowdiagramRepresentationToPath("/path/to/example-flow-diagram.dot")
-} catch let error {
-    NSLog("Could not save flowdiagram: \(error)")
-}
-```
-
-This creates a file containing:
-
-```dot
-digraph {
-    graph [rankdir=TB]
-    
-    0 [label="", shape=plaintext]
-    0 -> 1
-    
-    # node
-    1 [label="Empty", shape=box]
-    2 [label="Loading", shape=box]
-    3 [label="Cancel", shape=oval]
-    4 [label="Load", shape=oval]
-    5 [label="Complete", shape=box]
-    6 [label="FinishLoading", shape=oval]
-    7 [label="Failed", shape=box]
-    8 [label="Reset", shape=oval]
-
-    
-    # links
-    2 -> 3 [arrowhead=none]
-    3 -> 1
-    1 -> 4 [arrowhead=none]
-    4 -> 2
-    2 -> 6 [arrowhead=none]
-    6 -> 5
-    6 -> 7
-    5 -> 8 [arrowhead=none]
-    8 -> 1
-    7 -> 8 [arrowhead=none]
-
-}
-```

@@ -1,17 +1,15 @@
 Pod::Spec.new do |s|
   s.name         = "EFStateMachine"
-  s.version      = "0.2.0"
+  s.version      = "0.3.0"
   s.summary      = "A Simple State Machine in Swift."
   s.description  = <<-DESC
 A Simple State Machine in Swift
 
 Highlights of this state machine:
 
-* uses enums for states and actions
-* uses blocks to run actions and change state
-* runs callback handles on state changes
-* tracks state history
-* creates flow diagram for visual inspection
+* uses enums for states
+* support for associate types in state enums
+* runs callback handler on state changes
                    DESC
   s.homepage     = "https://github.com/Egeniq/EFStateMachine"
   s.license      = { :type => "MIT", :file => "LICENSE" }
