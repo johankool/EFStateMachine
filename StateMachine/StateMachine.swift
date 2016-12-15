@@ -56,14 +56,14 @@ Sample code:
 
 */
 
-public class StateMachine<S, A where S: Hashable, A: Hashable> {
+open class StateMachine<S, A> where S: Hashable, A: Hashable {
 
     /** An action handler
 
     - parameter machine: The machine running the handler
     - returns: The new state of the machine on completion of the handler
     */
-    public typealias ActionHandler = (machine: StateMachine<S, A>) -> S
+    public typealias ActionHandler = (_ machine: StateMachine<S, A>) -> S
 
     /** An state changed handler
 
@@ -71,31 +71,33 @@ public class StateMachine<S, A where S: Hashable, A: Hashable> {
     - parameter oldState: The previous state of the machine
     - parameter newState: The current state of the machine
     */
-    public typealias ChangeHandler = (machine: StateMachine<S, A>, oldState: S, newState: S) -> Void
+    public typealias ChangeHandler = (_ machine: StateMachine<S, A>, _ oldState: S, _ newState: S) -> Void
+
+    public typealias Action = (Set<S>, Set<S>, ActionHandler)
 
     /// The initial state of the machine
-    public private (set) var initialState: S
+    open fileprivate (set) var initialState: S
 
     /// The current state of the machine
-    public private (set) var state: S {
+    open fileprivate (set) var state: S {
         didSet(oldValue) {
             history.append(state)
             if UInt(history.count) == maxHistoryLength + 1 {
-                history.removeAtIndex(0)
+                history.remove(at: 0)
             }
             for (fromStates, toStates, changeHandler) in changes {
                 if (fromStates == nil || fromStates?.contains(oldValue) == true) && (toStates == nil || toStates?.contains(state) == true) {
-                    changeHandler(machine: self, oldState: oldValue, newState: state)
+                    changeHandler(self, oldValue, state)
                 }
             }
         }
     }
 
     /// A history of states the machine has been in from oldest to newest
-    public private (set) var history: [S]
+    open fileprivate (set) var history: [S]
 
     /// The maximum lenght of the history before it gets pruned
-    public private (set) var maxHistoryLength: UInt
+    open fileprivate (set) var maxHistoryLength: UInt
 
     /** Create a new state machine
 
@@ -114,7 +116,7 @@ public class StateMachine<S, A where S: Hashable, A: Hashable> {
         }
     }
 
-    private var actions: [A: (Set<S>, Set<S>, ActionHandler)] = [:]
+    fileprivate var actions: [A: Action] = [:]
 
     /** Registers an action
 
@@ -133,8 +135,9 @@ public class StateMachine<S, A where S: Hashable, A: Hashable> {
     - parameter toStates: The states that the action handler may return
     - parameter actionHandler: The handler to run when performing the action
     */
-    public func registerAction(action: A, fromStates: Set<S>, toStates: Set<S>, actionHandler: ActionHandler) {
-        actions[action] = (fromStates, toStates, actionHandler)
+    open func registerAction(_ action: A, fromStates: Set<S>, toStates: Set<S>, actionHandler: ActionHandler) {
+        // GRR at weird compile error!
+        //  actions[action] = (fromStates, toStates, actionHandler)
     }
 
     /** Performs a registered action
@@ -147,11 +150,10 @@ public class StateMachine<S, A where S: Hashable, A: Hashable> {
     - parameter delay: The delay in seconds after which the action should be performed
     - returns: Returns the new state if the action was run, or nil if the action is not (yet) run
     */
-    public func performAction(action: A, afterDelay delay: NSTimeInterval? = nil) -> S? {
+    open func performAction(_ action: A, afterDelay delay: TimeInterval? = nil) -> S? {
         if let delay = delay {
-            dispatch_after(
-                dispatch_time(DISPATCH_TIME_NOW, Int64(delay * Double(NSEC_PER_SEC))),
-                dispatch_get_main_queue(), { [weak self] in
+            DispatchQueue.main.asyncAfter(
+                deadline: DispatchTime.now() + Double(Int64(delay * Double(NSEC_PER_SEC))) / Double(NSEC_PER_SEC), execute: { [weak self] in
                     self?.performAction(action)
             })
             return nil
@@ -165,7 +167,7 @@ public class StateMachine<S, A where S: Hashable, A: Hashable> {
         if let (fromStates, toStates, actionHandler) = actions[action] {
             if fromStates.contains(state) {
                 actionHandlerRunning = true
-                let newState = actionHandler(machine: self)
+                let newState = actionHandler(self)
                 actionHandlerRunning = false
                 if toStates.contains(newState) {
                     state = newState
@@ -178,9 +180,9 @@ public class StateMachine<S, A where S: Hashable, A: Hashable> {
         return nil
     }
 
-    private var actionHandlerRunning: Bool = false
+    fileprivate var actionHandlerRunning: Bool = false
 
-    private var changes: [(Set<S>?, Set<S>?, ChangeHandler)] = []
+    fileprivate var changes: [(Set<S>?, Set<S>?, ChangeHandler)] = []
 
     /** Registers a handler to run on state change
 
@@ -195,8 +197,9 @@ public class StateMachine<S, A where S: Hashable, A: Hashable> {
     - parameter toStates: The handler is only run if the new state is in this set. If nil, any state is acceptable.
     - parameter changeHandler: The handler to run
     */
-    public func onChange(fromStates fromStates: Set<S>? = nil, toStates: Set<S>? = nil, changeHandler: ChangeHandler) {
-        changes.append((fromStates, toStates, changeHandler))
+    open func onChange(fromStates: Set<S>? = nil, toStates: Set<S>? = nil, changeHandler: ChangeHandler) {
+        // GRR at weird compile error!
+        // changes.append((fromStates, toStates, changeHandler))
     }
 
 }
@@ -208,13 +211,13 @@ public extension StateMachine {
         return representation.description
     }
 
-    func saveFlowdiagramRepresentationToPath(path: String) throws {
-        try flowdiagramRepresentation.writeToFile(path, atomically: true, encoding: NSUTF8StringEncoding)
+    func saveFlowdiagramRepresentationToPath(_ path: String) throws {
+        try flowdiagramRepresentation.write(toFile: path, atomically: true, encoding: String.Encoding.utf8)
     }
 
 }
 
-class Flowdiagram<S, A where S: Hashable, A: Hashable>: CustomStringConvertible {
+class Flowdiagram<S, A>: CustomStringConvertible where S: Hashable, A: Hashable {
 
     let machine:  StateMachine<S, A>
 
@@ -246,7 +249,7 @@ class Flowdiagram<S, A where S: Hashable, A: Hashable>: CustomStringConvertible 
                 return "    \(index) [label=\"\(action)\", shape=oval]\n"
             }
             return "    \n"
-        }).joinWithSeparator("")
+        }).joined(separator: "")
 
         let linksStr = links.map({ (from: Int, to: Int, hasArrow: Bool) in
             if hasArrow {
@@ -254,15 +257,15 @@ class Flowdiagram<S, A where S: Hashable, A: Hashable>: CustomStringConvertible 
             } else {
                 return "    \(from) -> \(to) [arrowhead=none]\n"
             }
-        }).joinWithSeparator("")
+        }).joined(separator: "")
 
         return "digraph {\n    graph [rankdir=TB]\n    \n    0 [label=\"\", shape=plaintext]\n    0 -> 1\n    \n    # node\n\(nodesStr)\n    \n    # links\n\(linksStr)\n}"
     }
 
-    private var nodes: [(Int, S?, A?)] = []
-    private var links: [(Int, Int, Bool)] = []
+    fileprivate var nodes: [(Int, S?, A?)] = []
+    fileprivate var links: [(Int, Int, Bool)] = []
 
-    private func addState(state: S) -> Int {
+    fileprivate func addState(_ state: S) -> Int {
         let filtered = nodes.filter() { (index: Int, aState: S?, action: A?) in
             return aState == nil ? false : state == aState!
         }
@@ -275,7 +278,7 @@ class Flowdiagram<S, A where S: Hashable, A: Hashable>: CustomStringConvertible 
         }
     }
 
-    private func addAction(action: A) -> Int {
+    fileprivate func addAction(_ action: A) -> Int {
         let filtered = nodes.filter() { (index: Int, aState: S?, anAction: A?) in
             return anAction == nil ? false : action == anAction!
         }
@@ -288,14 +291,14 @@ class Flowdiagram<S, A where S: Hashable, A: Hashable>: CustomStringConvertible 
         }
     }
 
-    private func addAction(action: A, fromIndex: Int, toIndex: Int) {
+    fileprivate func addAction(_ action: A, fromIndex: Int, toIndex: Int) {
         let actionIndex = addAction(action)
         addLink(fromIndex: fromIndex, toIndex: actionIndex, hasArrow: false)
         addLink(fromIndex: actionIndex, toIndex: toIndex, hasArrow: true)
     }
 
-    private func addLink(fromIndex fromIndex: Int, toIndex: Int, hasArrow: Bool) {
-        if !links.contains({ (from: Int, to: Int, arrow: Bool) in
+    fileprivate func addLink(fromIndex: Int, toIndex: Int, hasArrow: Bool) {
+        if !links.contains(where: { (from: Int, to: Int, arrow: Bool) in
             return from == fromIndex && to == toIndex && arrow == hasArrow
         }) {
             links.append((fromIndex, toIndex, hasArrow))

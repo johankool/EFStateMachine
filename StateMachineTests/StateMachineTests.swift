@@ -11,17 +11,17 @@ import StateMachine
 
 class StateMachineTests: XCTestCase {
 
-    private enum TestLoadState: String {
+    fileprivate enum TestLoadState: String {
         case Empty, Loading, Partial, Complete, Failed
     }
 
-    private enum TestLoadAction: String {
+    fileprivate enum TestLoadAction: String {
         case Load, FinishLoading, LoadMore, Cancel, Reset, Mystery
     }
 
-    private var loadMachine: StateMachine<TestLoadState, TestLoadAction>!
+    fileprivate var loadMachine: StateMachine<TestLoadState, TestLoadAction>!
 
-    private func setupLoadMachine(length length: UInt = 3) -> StateMachine<TestLoadState, TestLoadAction> {
+    fileprivate func setupLoadMachine(length: UInt = 3) -> StateMachine<TestLoadState, TestLoadAction> {
         let machine = StateMachine<TestLoadState, TestLoadAction>(initialState: .Empty, maxHistoryLength: length)
 
         machine.registerAction(.Load, fromStates: [.Empty], toStates: [.Loading]) { (machine) -> StateMachineTests.TestLoadState in
@@ -61,7 +61,7 @@ class StateMachineTests: XCTestCase {
         return machine
     }
 
-    private var recordedCallBacks: [(Int, StateMachine<TestLoadState, TestLoadAction>, TestLoadState, TestLoadState)] = []
+    fileprivate var recordedCallBacks: [(Int, StateMachine<TestLoadState, TestLoadAction>, TestLoadState, TestLoadState)] = []
 
     override func setUp() {
         super.setUp()
